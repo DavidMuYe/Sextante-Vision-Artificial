@@ -1,0 +1,97 @@
+import cv2
+import numpy as np
+
+def detect_horizon_line_and_circles(image_path):
+    # Lee la imagen
+    image = cv2.imread(image_path)
+
+    # Convierte la imagen a escala de grises
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    # Utiliza el algoritmo de Canny para detectar bordes
+    canny_image = cv2.Canny(gray, 100, 200)
+
+    # Utiliza la función cv2.HoughLinesP para detectar líneas
+    lines = cv2.HoughLinesP(canny_image, 1, np.pi/180, 90, minLineLength=80, maxLineGap=55)
+
+    # Filtra las líneas detectadas para obtener solo la línea del horizonte
+    horizon_lines = []
+    for line in lines:
+        x1, y1, x2, y2 = line[0]
+        if abs(y2 - y1) < 10:  # Filtra líneas con pendiente muy pequeña
+            horizon_lines.append(line)
+
+    # Dibuja la línea del horizonte en la imagen original
+    for line in horizon_lines:
+        x1, y1, x2, y2 = line[0]
+        cv2.line(image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+        # Calcula la coordenada de la línea horizontal respecto al centro del círculo
+        center_y = (y1 + y2) // 2
+        cv2.putText(image, f"Coord linea horizonte: {center_y}", (x1, center_y - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+
+    gray = cv2.medianBlur(gray, 5)
+
+    canny_image = cv2.Canny(gray, 0, 150)
+
+    rows = gray.shape[0]
+    circles = cv2.HoughCircles(canny_image, cv2.HOUGH_GRADIENT, 2, rows / 8,
+                              param1=1400, param2=55,
+                              minRadius=10, maxRadius=50)
+
+    circle_center = None  # Almacenará el centro del círculo encontrado
+
+    if circles is not None:
+        circles = np.uint16(np.around(circles))
+        for i in circles[0, :]:
+            center = (i[0], i[1])
+            circle_center = center  # Almacena la posición del centro del círculo
+            cv2.circle(image, center, 1, (0, 100, 100), 3)
+            radius = i[2]
+            diameter = 2 * radius
+            cv2.circle(image, center, radius, (255, 0, 255), 3)
+            cv2.putText(image, f"Diametro: {diameter} pixeles", (center[0] + 10, center[1] - 30),
+                       cv2.FONT_ITALIC, 0.5, (255, 0, 0), 1)
+
+            # Imprime las coordenadas del centro del círculo
+            cv2.putText(image, f"Centro: {center}", (center[0] + 30, center[1] - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+
+    if circle_center is not None:
+        # Almacena las coordenadas Y de la línea horizontal
+        horizon_y_coordinates = [line[0][1] for line in horizon_lines]
+
+        # Calcula el promedio de las coordenadas Y de la línea horizontal
+        average_horizon_y = sum(horizon_y_coordinates) / len(horizon_y_coordinates)
+
+        # Calcula la distancia desde el borde inferior del sol hasta la línea horizontal
+        if circle_center is not None:
+            circle_center_y = circle_center[1]
+            distance_to_horizon = abs(circle_center_y - average_horizon_y) - radius
+
+            # Tamaño del círculo del sol en unidades del mundo real
+            size_of_sun_circle_real_units = 0.53  # unidades
+
+            # Tamaño del círculo del sol en píxeles en la imagen
+            size_of_sun_circle_pixels = diameter  # Diámetro del círculo detectado en la imagen
+
+            # Relación de escala entre los píxeles y las unidades de medida en el mundo real
+            scale_factor = size_of_sun_circle_real_units / size_of_sun_circle_pixels
+
+            # Distancia real desde el borde inferior del sol hasta la línea del horizonte
+            distance_to_horizon_real_units = distance_to_horizon * scale_factor
+
+            # Imprime la distancia desde el borde inferior del sol hasta la línea horizontal
+            print(f"Distancia desde el borde inferior del sol hasta la línea del horizonte: {distance_to_horizon} píxeles")
+
+            # Imprime la distancia desde el borde inferior del sol hasta la línea horizontal en unidades del mundo real
+            print(f"Distancia desde el borde inferior del sol hasta la línea del horizonte: {distance_to_horizon_real_units} unidades del mundo real")
+
+    # Muestra la imagen con la línea del horizonte, los círculos detectados y la línea vertical
+    cv2.imshow('Horizon Line and Circles', image)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+# Ejemplo de uso
+detect_horizon_line_and_circles('imagen.png')
