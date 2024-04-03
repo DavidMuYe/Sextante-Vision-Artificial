@@ -1,0 +1,27 @@
+import cv2
+
+# Cargar la imagen
+image = cv2.imread('img_12.png')
+
+# Redimensionar la imagen a un tercio del tamaño original
+height, width = image.shape[:2]
+new_height = int(height / 3)
+new_width = int(width / 3)
+resized_image = cv2.resize(image, (new_width, new_height))
+
+# Convertir la imagen a escala de grises
+gray_image = cv2.cvtColor(resized_image, cv2.COLOR_BGR2GRAY)
+
+# Aplicar el algoritmo Canny
+canny_image_gray = cv2.Canny(gray_image, 0, 150)
+canny_image = cv2.Canny(resized_image, 0, 150)
+
+# Mostrar la imagen original, escala de grises y con bordes detectados
+cv2.imshow('Imagen original', resized_image)
+cv2.imshow('Imagen EDG', gray_image)
+cv2.imshow('Original con bordes detectados', canny_image)
+cv2.imshow('EDG con bordes detectados', canny_image_gray)
+
+# Esperar a que el usuario cierre las ventanas
+cv2.waitKey(0)
+cv2.destroyAllWindows()
