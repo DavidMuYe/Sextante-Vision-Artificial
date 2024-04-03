@@ -1,0 +1,160 @@
+import cv2
+import numpy as np
+import tkinter as tk
+from tkinter import filedialog, messagebox
+from PIL import Image, ImageTk
+
+class HorizonSunDetector:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Sextante")
+
+        self.canvas = tk.Canvas(self.root, width=800, height=600)
+        self.canvas.pack()
+
+        self.load_button = tk.Button(self.root, text="Cargar Imagen", command=self.load_image)
+        self.load_button.pack()
+
+        self.info_label = tk.Label(self.root, text="")
+        self.info_label.pack()
+
+        self.cropped_image = None
+
+    def load_image(self):
+        self.image_path = filedialog.askopenfilename()
+        if self.image_path:
+            self.select_and_process_roi()
+
+    def select_and_process_roi(self):
+        original_image = cv2.imread(self.image_path)
+        self.cropped_image = self.select_roi(original_image)
+        if self.cropped_image is not None:
+            result_image, measurements = self.detect_horizon_line_and_circles(self.cropped_image)
+            self.display_image(result_image)
+            self.show_measurements(measurements)
+
+    def select_roi(self, image):
+        clone = image.copy()
+        # Redimensiona la imagen a un tercio de su tamaño original
+        width, height = clone.shape[1], clone.shape[0]
+        new_width = width // 5
+        new_height = height // 5
+        clone = cv2.resize(clone, (new_width, new_height))
+
+        roi = cv2.selectROI("Selecciona ROI", clone, fromCenter=False, showCrosshair=True)
+        cv2.destroyWindow("Selecciona ROI")
+
+        if roi[2] > 0 and roi[3] > 0:
+            x, y, w, h = roi
+            # Escala las coordenadas de la ROI a la imagen original
+            x *= 5
+            y *= 5
+            w *= 5
+            h *= 5
+            cropped_image = image[y:y + h, x:x + w]
+            return cropped_image
+        else:
+            messagebox.showwarning("Advertencia", "No se ha seleccionado ninguna región de interés.")
+            return None
+
+    def detect_horizon_line_and_circles(self, image):
+        # Lee la imagen
+        image = self.cropped_image
+
+        # Convierte la imagen a escala de grises
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+        # Utiliza el algoritmo de Canny para detectar bordes
+        canny_image = cv2.Canny(gray, 100, 200)
+
+        # Utiliza la función cv2.HoughLinesP para detectar líneas
+        lines = cv2.HoughLinesP(canny_image, 1, np.pi / 180, 90, minLineLength=80, maxLineGap=55)
+
+        # Filtra las líneas detectadas para obtener solo la línea del horizonte
+        horizon_lines = []
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+            if abs(y2 - y1) < 5:  # Filtra líneas con pendiente muy pequeña
+                horizon_lines.append(line)
+
+        # Dibuja la línea del horizonte en la imagen original
+        for line in horizon_lines:
+            x1, y1, x2, y2 = line[0]
+            cv2.line(image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+            # Calcula la coordenada de la línea horizontal respecto al centro del círculo
+            center_y = (y1 + y2) // 2
+            cv2.putText(image, f"Coord linea horizonte: {center_y}", (x1, center_y - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+
+        gray = cv2.medianBlur(gray, 5)
+
+        canny_image = cv2.Canny(gray, 0, 150)
+
+        rows = gray.shape[0]
+        circles = cv2.HoughCircles(canny_image, cv2.HOUGH_GRADIENT, 2, rows / 8,
+                                   param1=1400, param2=55,
+                                   minRadius=50, maxRadius=100)
+
+        circle_center = None  # Almacenará el centro del círculo encontrado
+        measurements = {}
+
+        if circles is not None:
+            circles = np.uint16(np.around(circles))
+            for i in circles[0, :]:
+                center = (i[0], i[1])
+                circle_center = center  # Almacena la posición del centro del círculo
+                cv2.circle(image, center, 1, (0, 100, 100), 3)
+                radius = i[2]
+                diameter = 2 * radius
+                cv2.circle(image, center, radius, (255, 0, 255), 3)
+                cv2.putText(image, f"Diametro: {diameter} pixeles", (center[0] + 10, center[1] - 30),
+                            cv2.FONT_ITALIC, 0.5, (255, 0, 0), 1)
+
+                # Imprime las coordenadas del centro del círculo
+                cv2.putText(image, f"Centro: {center}", (center[0] + 30, center[1] - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+
+                measurements["Diametro"] = diameter
+                measurements["Centro"] = center
+
+        if circle_center is not None:
+            # Almacena las coordenadas Y de la línea horizontal
+            horizon_y_coordinates = [line[0][1] for line in horizon_lines]
+
+            # Calcula el promedio de las coordenadas Y de la línea horizontal
+            average_horizon_y = sum(horizon_y_coordinates) / len(horizon_y_coordinates)
+
+            # Calcula la distancia desde el borde inferior del sol hasta la línea horizontal
+            if circle_center is not None:
+                circle_center_y = circle_center[1]
+                distance_to_horizon_pixels = abs(circle_center_y - average_horizon_y) - radius
+                distance_to_horizon_real = distance_to_horizon_pixels * 0.016 * 5
+
+                measurements["Distancia al horizonte (pixeles)"] = distance_to_horizon_pixels
+                measurements["Distancia al horizonte (unidades del mundo real)"] = distance_to_horizon_real
+
+        return image, measurements
+
+    def display_image(self, image):
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        image = Image.fromarray(image)
+        image.thumbnail((800, 600))
+        photo = ImageTk.PhotoImage(image)
+        self.canvas.create_image(0, 0, anchor=tk.NW, image=photo)
+        self.canvas.image = photo
+
+    def show_measurements(self, measurements):
+        if measurements:
+            info_str = "\n".join([f"{key}: {value}" for key, value in measurements.items()])
+            self.info_label.config(text=info_str)
+        else:
+            self.info_label.config(text="No se detectaron medidas.")
+
+    def run(self):
+        self.root.mainloop()
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = HorizonSunDetector(root)
+    app.run()
